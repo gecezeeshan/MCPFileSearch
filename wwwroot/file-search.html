@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <title>File Search</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            margin: 0;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .file-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f3f3f3;
+            border-radius: 6px;
+        }
+
+        .search-container {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        #searchText {
+            flex: 1;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+
+        #status {
+            margin-top: 10px;
+            color: #666;
+        }
+
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            min-height: 50px;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <h2>📄 File Search</h2>
+
+    <input type="file" id="fileInput" accept=".txt,.md,.csv,.cs,.js,.ts,.json,.xml,.html,.css,.yaml,.yml,.log" />
+
+    <div id="fileInfo" class="file-info">
+        No file selected
+    </div>
+
+    <div class="search-container">
+
+        <input type="text" id="searchText" placeholder="Enter text to search..." />
+
+        <button id="searchButton" type="button">
+            Search
+        </button>
+
+    </div>
+
+    <div id="status"></div>
+
+    <div id="result">
+        Search results will appear here.
+    </div>
+
+
+    <script type="module">
+
+        /*
+         * MCP Apps SDK
+         *
+         * This import gives us the App class.
+         */
+        let app = null;
+
+
+        /*
+         * HTML elements
+         */
+        const fileInput =
+            document.getElementById("fileInput");
+
+        const fileInfo =
+            document.getElementById("fileInfo");
+
+        const searchText =
+            document.getElementById("searchText");
+
+        const searchButton =
+            document.getElementById("searchButton");
+
+        const status =
+            document.getElementById("status");
+
+        const result =
+            document.getElementById("result");
+
+
+        /*
+         * Variables containing the uploaded file.
+         */
+        let selectedFile = null;
+
+        let fileContent = "";
+
+
+        function findMatches(content, query) {
+
+            return content
+                .split(/\r?\n/)
+                .filter(line =>
+                    line.toLocaleLowerCase().includes(
+                        query.toLocaleLowerCase()));
+        }
+
+
+        function getToolText(toolResult) {
+
+            const content =
+                toolResult?.content ??
+                toolResult?.result?.content;
+
+            if (Array.isArray(content)) {
+
+                return content
+                    .filter(item => item?.type === "text")
+                    .map(item => item.text)
+                    .filter(Boolean)
+                    .join("\n");
+            }
+
+            if (typeof toolResult === "string")
+                return toolResult;
+
+            return "";
+        }
+
+
+        /*
+         * User selects a file.
+         */
+        fileInput.addEventListener(
+            "change",
+            async () => {
+
+                const files = fileInput.files;
+
+                selectedFile =
+                    files && files.length > 0
+                        ? files[0]
+                        : null;
+
+                if (!selectedFile) {
+
+                    fileInfo.textContent =
+                        "No file selected";
+
+                    fileContent = "";
+
+                    return;
+                }
+
+
+                fileInfo.textContent =
+                    `File selected: ${selectedFile.name}`;
+
+                status.textContent =
+                    "Reading selected file...";
+
+
+                /*
+                 * Read the file locally
+                 * in the HTML UI.
+                 */
+                try {
+
+                    fileContent =
+                        await selectedFile.text();
+
+                }
+                catch (error) {
+
+                    console.error("Unable to read selected file.", error);
+
+                    fileContent = "";
+
+                    status.textContent =
+                        "Unable to read the selected file.";
+
+                    result.textContent =
+                        "Please select a readable text file.";
+
+                    return;
+                }
+
+
+                status.textContent =
+                    `Loaded ${fileContent.length} characters. Ready to search.`;
+
+
+                result.textContent =
+                    "File loaded. Enter a search term.";
+
+            }
+        );
+
+
+        /*
+         * Search button.
+         */
+        searchButton.addEventListener(
+            "click",
+            async () => {
+
+                if (!selectedFile) {
+
+                    result.textContent =
+                        "Please select a file first.";
+
+                    return;
+                }
+
+
+                const search =
+                    searchText.value.trim();
+
+
+                if (!search) {
+
+                    result.textContent =
+                        "Please enter something to search.";
+
+                    return;
+                }
+
+
+                status.textContent =
+                    "Searching...";
+
+                result.textContent =
+                    "Searching...";
+
+                const localMatches =
+                    findMatches(fileContent, search);
+
+                result.textContent = localMatches.length > 0
+                    ? localMatches.join("\n")
+                    : `No information found for '${search}'.`;
+
+
+                try {
+
+                    /*
+                     * Call the MCP server tool.
+                     *
+                     * This does NOT directly call
+                     * localhost:3001.
+                     *
+                     * The MCP Apps host receives
+                     * this request and proxies it
+                     * to your MCP server.
+                     */
+                    const response =
+                        await app.callServerTool({
+                            name: "SearchFile",
+
+                            arguments: {
+
+                                fileName:
+                                    selectedFile.name,
+
+                                fileContent:
+                                    fileContent,
+
+                                searchText:
+                                    search
+
+                            }
+                        });
+
+
+                    console.log(
+                        "MCP response:",
+                        response
+                    );
+
+
+                    /*
+                     * Extract text returned
+                     * by the MCP tool.
+                     */
+                    const text =
+                        getToolText(response);
+
+
+                    if (text)
+                        result.textContent = text;
+
+
+                    status.textContent =
+                        "Search completed.";
+
+                }
+                catch (error) {
+
+                    console.error(error);
+
+                    status.textContent =
+                        "Local search completed; server sync unavailable.";
+
+                }
+
+            }
+        );
+
+
+        async function connectMcpApp() {
+
+            try {
+
+                const sdk =
+                    await import("https://esm.sh/@modelcontextprotocol/ext-apps");
+
+                app = new sdk.App({
+                    name: "File Search",
+                    version: "1.0.0"
+                });
+
+                app.ontoolresult = (toolResult) => {
+
+                    const text = getToolText(toolResult);
+
+                    if (text)
+                        result.textContent = text;
+
+                };
+
+                await app.connect();
+
+            }
+            catch (error) {
+
+                console.warn(
+                    "MCP integration unavailable; local file search remains active.",
+                    error);
+
+            }
+        }
+
+
+        connectMcpApp();
+
+    </script>
+
+</body>
+
+</html>
